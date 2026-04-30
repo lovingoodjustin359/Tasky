@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart Task Manager</title>
+<style>
+body { font-family: Arial, sans-serif; max-width: 900px; margin: auto; padding: 20px; box-sizing: border-box; }
+*, *::before, *::after { box-sizing: border-box; }
+
+.controls { margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.controls input,
+.controls select,
+.controls button {
+  font-size: 16px;
+  padding: 10px 12px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  background: #fff;
+}
+.controls input[type="text"],
+.controls input#title {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.controls select {
+  flex: 0 1 auto;
+  min-width: 100px;
+}
+.controls input[type="date"] {
+  flex: 0 1 auto;
+}
+.controls button {
+  cursor: pointer;
+  background: #f0f0f0;
+  font-weight: bold;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  padding: 10px 16px;
+}
+.controls button:active {
+  background: #ddd;
+}
+.voice-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  padding: 0 !important;
+  border-radius: 50% !important;
+  font-size: 20px !important;
+  background: #f0f0f0;
+  border: 1px solid #ccc;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.voice-btn.listening {
+  background: #ff4444;
+  color: #fff;
+  border-color: #ff4444;
+  animation: pulse 1s infinite;
+}
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255,68,68,0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(255,68,68,0); }
+}
+.voice-unsupported { display: none; }
+
+.task { border: 1px solid #ddd; padding: 12px; margin-top: 10px; border-radius: 10px; display: flex; align-items: flex-start; gap: 10px; }
+.task .circle { flex-shrink: 0; margin-top: 4px; }
+.done { text-decoration: line-through; color: gray; }
+.task button {
+  font-size: 14px;
+  padding: 6px 12px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #f0f0f0;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.task button:active {
+  background: #ddd;
+}
+
+.circle { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+.low { background-color: #add8e6; }
+.medium { background-color: #ffb347; }
+.high { background-color: #cba6f7; }
+
+@media (max-width: 600px) {
+  body { padding: 12px; }
+  h2 { font-size: 1.3rem; margin-bottom: 12px; }
+  .controls { gap: 6px; }
+  .controls input,
+  .controls select,
+  .controls button {
+    font-size: 16px;
+    padding: 10px;
+  }
+  .controls input#title {
+    flex: 1 1 calc(100% - 52px);
+  }
+  .controls select {
+    flex: 1 1 calc(50% - 3px);
+    min-width: 0;
+  }
+  .controls input[type="date"] {
+    flex: 1 1 100%;
+  }
+  .task { padding: 10px; gap: 8px; }
+  .task button { padding: 8px 12px; margin-top: 2px; }
+}
+</style>
+</head>
+<body>
+
+<h2>Smart Task Manager</h2>
+
+<div class="controls">
+  <input id="title" placeholder="Task name">
+  <button id="voiceBtn" class="voice-btn" onclick="toggleVoice()" title="Voice input">🎤</button>
+  <select id="priority">
+    <option>High</option>
+    <option selected>Medium</option>
+    <option>Low</option>
+  </select>
+  <select id="category">
+    <option>Work</option>
+    <option>Personal</option>
+    <option>Shop</option>
+  </select>
+  <select id="recurring">
+    <option value="">One-time</option>
+    <option value="daily">Daily</option>
+    <option value="weekly">Weekly</option>
+  </select>
+  <input type="date" id="dueDate">
+  <button onclick="addTask()">Add</button>
+  <button onclick="clearFields()">Clear</button>
+</div>
+
+<div class="controls">
+  <button onclick="setFilter('All')">All</button>
+  <button onclick="setFilter('Today')">Today Focus</button>
+</div>
+
+<div id="tasks"></div>
+
+<script>
+// MIGRATION
+let tasks = JSON.parse(localStorage.getItem('tasks_v4') || '[]');
+
+if (tasks.length === 0) {
+  const oldTasks = JSON.parse(localStorage.getItem('tasks_v3') || '[]');
+  if (oldTasks.length > 0) {
+    tasks = oldTasks.map(t => ({
+      ...t,
+      completedDate: t.completed ? new Date().toISOString() : null
+    }));
+    localStorage.setItem('tasks_v4', JSON.stringify(tasks));
+  }
+}
+
+let filter = "All";
+
+function save() {
+localStorage.setItem('tasks_v4', JSON.stringify(tasks));
+}
+
+function clearFields() {
+document.getElementById('title').value = '';
+document.getElementById('priority').value = 'Medium';
+document.getElementById('category').value = 'Work';
+document.getElementById('recurring').value = '';
+document.getElementById('dueDate').value = '';
+}
+
+function addTask() {
+const title = document.getElementById('title').value;
+const priority = document.getElementById('priority').value;
+const dueDate = document.getElementById('dueDate').value;
+const category = document.getElementById('category').value;
+const recurring = document.getElementById('recurring').value;
+
+if (!title) return;
+
+tasks.push({
+id: Date.now(),
+title,
+priority,
+dueDate,
+category,
+recurring,
+importanceBoost: 0,
+completed: false,
+completedDate: null
+});
+
+save();
+render();
+}
+
+function toggle(id) {
+tasks = tasks.map(t => {
+if (t.id === id) {
+if (!t.completed) {
+return {...t, completed: true, completedDate: new Date().toISOString()};
+} else {
+return {...t, completed: false, completedDate: null};
+}
+}
+return t;
+});
+save();
+render();
+}
+
+function deleteTask(id) {
+tasks = tasks.filter(t => t.id !== id);
+save();
+render();
+}
+
+function cleanupOldTasks() {
+const now = new Date();
+tasks = tasks.filter(t => {
+if (t.completed && t.completedDate) {
+const completedTime = new Date(t.completedDate);
+const diffDays = (now - completedTime) / (1000 * 60 * 60 * 24);
+return diffDays <= 30;
+}
+return true;
+});
+}
+
+function processRecurring() {
+const today = new Date().toISOString().split("T")[0];
+
+tasks.forEach(t => {
+if (t.recurring && t.completed) {
+let nextDate = new Date(t.dueDate || today);
+
+if (t.recurring === "daily") nextDate.setDate(nextDate.getDate() + 1);
+if (t.recurring === "weekly") nextDate.setDate(nextDate.getDate() + 7);
+
+t.dueDate = nextDate.toISOString().split("T")[0];
+t.completed = false;
+t.completedDate = null;
+}
+});
+}
+
+function boost(id) {
+tasks = tasks.map(t => t.id === id ? {...t, importanceBoost: t.importanceBoost + 1} : t);
+save();
+render();
+}
+
+function setFilter(f) {
+filter = f;
+render();
+}
+
+function calculateScore(task) {
+const weight = {High: 3, Medium: 2, Low: 1};
+let score = weight[task.priority] * 5;
+
+if (task.dueDate) {
+const days = (new Date(task.dueDate) - new Date()) / (1000 * 60 * 60 * 24);
+score += -days;
+}
+
+score += task.importanceBoost * 2;
+return score;
+}
+
+function getUrgencyClass(task) {
+if (!task.dueDate) {
+if (task.priority === 'High') return 'high';
+if (task.priority === 'Medium') return 'medium';
+return 'low';
+}
+
+const today = new Date();
+const due = new Date(task.dueDate);
+const diffDays = (due - today) / (1000 * 60 * 60 * 24);
+
+if (diffDays <= 1) return 'high';
+if (diffDays <= 3) return 'medium';
+return 'low';
+}
+
+function render() {
+processRecurring();
+cleanupOldTasks();
+
+const container = document.getElementById('tasks');
+container.innerHTML = '';
+
+let list = [...tasks];
+
+if (filter === "Today") {
+const today = new Date().toISOString().split("T")[0];
+list = list.filter(t => t.dueDate === today || t.priority === "High");
+}
+
+list.sort((a,b)=>{
+if (a.completed !== b.completed) return a.completed ? 1 : -1;
+return calculateScore(b) - calculateScore(a);
+});
+
+list.forEach(t=>{
+const div = document.createElement('div');
+div.className = 'task';
+
+const urgencyClass = getUrgencyClass(t);
+
+div.innerHTML = `
+<span class="circle ${urgencyClass}"></span>
+<div style="flex:1;">
+<div class="${t.completed ? 'done' : ''}">
+<strong>${t.title}</strong>
+</div>
+<div>
+${t.category} • ${t.priority} • Score: ${calculateScore(t).toFixed(1)}
+${t.dueDate ? ' • Due ' + t.dueDate : ''}
+${t.recurring ? ' • ' + t.recurring : ''}
+</div>
+<div style="margin-top:5px;">
+<button onclick="boost(${t.id})">Boost</button>
+<button onclick="toggle(${t.id})">${t.completed ? 'Undo' : 'Done'}</button>
+<button onclick="deleteTask(${t.id})">Delete</button>
+</div>
+</div>
+`;
+
+container.appendChild(div);
+});
+
+save();
+}
+
+render();
+
+// Voice input using Web Speech API
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const voiceBtn = document.getElementById('voiceBtn');
+let recognition = null;
+let isListening = false;
+let manualStop = false;
+
+if (SpeechRecognition) {
+  recognition = new SpeechRecognition();
+  recognition.lang = 'en-US';
+  recognition.interimResults = true;
+  recognition.continuous = true;
+  recognition.maxAlternatives = 1;
+
+  recognition.onresult = function(event) {
+    let transcript = '';
+    for (let i = 0; i < event.results.length; i++) {
+      transcript += event.results[i][0].transcript;
+    }
+    document.getElementById('title').value = transcript;
+  };
+
+  recognition.onerror = function(event) {
+    if (event.error !== 'aborted' && event.error !== 'no-speech') {
+      stopVoice();
+    }
+  };
+
+  recognition.onend = function() {
+    if (manualStop) {
+      manualStop = false;
+      return;
+    }
+    if (isListening) {
+      try { recognition.start(); } catch(e) { stopVoice(); }
+    }
+  };
+} else {
+  voiceBtn.classList.add('voice-unsupported');
+}
+
+function toggleVoice() {
+  if (!recognition) return;
+  if (isListening) {
+    manualStop = true;
+    recognition.stop();
+    stopVoice();
+  } else {
+    isListening = true;
+    manualStop = false;
+    voiceBtn.classList.add('listening');
+    voiceBtn.title = 'Listening... click to stop';
+    try { recognition.start(); } catch(e) { stopVoice(); }
+  }
+}
+
+function stopVoice() {
+  isListening = false;
+  voiceBtn.classList.remove('listening');
+  voiceBtn.title = 'Voice input';
+}
+</script>
+
+</body>
+</html>
